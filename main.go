@@ -35,4 +35,6 @@ func main() {
 	if err = database.AddNumbers(phoneNumbers); err != nil {
 		fmt.Println(err)
 	}
+
+	fmt.Println("Successfully added numbers to database")
 }
