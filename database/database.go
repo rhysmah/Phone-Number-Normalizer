@@ -105,6 +105,16 @@ func insertInitialData(numbers []string) error {
 	return nil
 }
 
+func InsertData(normalizedNumbers []string) error {
+	for id, number := range normalizedNumbers {
+		if _, err := db.Exec("UPDATE phoneNumbers SET numbers = ? WHERE id = ?", number, id); err != nil {
+			return fmt.Errorf("error updating normalized phone number for id '%d': %w", id, err)
+		}
+	}
+	log.Println("Successfully inserted normalized data")
+	return nil
+}
+
 // ReadNumbers reads all phone numbers from the "phoneNumbers" table.
 //
 // Returns:
