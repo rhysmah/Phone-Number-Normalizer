@@ -9,11 +9,6 @@ import (
 func main() {
 	var err error
 
-	phoneNumbers, err := file.ProcessFile()
-	if err != nil {
-		fmt.Println(err)
-	}
-
 	if err = database.InitializeDB(); err != nil {
 		fmt.Println(err)
 	}
@@ -23,6 +18,11 @@ func main() {
 			fmt.Println(err)
 		}
 	}()
+
+	phoneNumbers, err := file.ProcessFile()
+	if err != nil {
+		fmt.Println(err)
+	}
 
 	if err = database.CreateTable(phoneNumbers); err != nil {
 		fmt.Println(err)
