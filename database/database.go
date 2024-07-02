@@ -4,21 +4,40 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"regexp"
 
 	_ "github.com/mattn/go-sqlite3"
 )
 
 var db *sql.DB
 
-// InitializeDB opens a connection to the SQLite database "database.db"
-// and verifies the connection by pinging the database.
-//
-// Returns:
-// - nil if the connection is successfully established and verified.
-// - An error if there is an issue opening or pinging the database.
-func InitializeDB() error {
-	var err error
+// Initialize database and table with initial data
 
+func CreateDatabase(initialData []string) error {
+	if err := initializeDB(); err != nil {
+		return err
+	}
+
+	func() {
+		if err := closeDB(); err != nil {
+			log.Printf("error closing database: %v", err)
+		}
+	}()
+
+	if err := createTable(); err != nil {
+		return err
+	}
+
+	if err := insertInitialData(initialData); err != nil {
+		return err
+	}
+
+	log.Printf("successfully initialized database with initial data")
+	return nil
+}
+
+func initializeDB() error {
+	var err error
 	db, err = sql.Open("sqlite3", "database.db")
 	if err != nil {
 		return fmt.Errorf("error initializing database: %w", err)
@@ -32,12 +51,7 @@ func InitializeDB() error {
 	return nil
 }
 
-// CloseDB closes the connection to the SQLite database.
-//
-// Returns:
-// - nil if the connection is successfully closed.
-// - An error if there is an issue closing the database connection.
-func CloseDB() error {
+func closeDB() error {
 	if err := db.Close(); err != nil {
 		return fmt.Errorf("error closing database: %w", err)
 	}
@@ -45,20 +59,7 @@ func CloseDB() error {
 	return nil
 }
 
-// CreateTable creates the "phoneNumbers" table in the SQLite database
-// if it does not already exist and inserts initial data if the table is empty.
-//
-// The table schema includes:
-// - id: an INTEGER PRIMARY KEY with AUTOINCREMENT
-// - numbers: a TEXT field
-//
-// Parameters:
-// - numbers: A slice of strings containing the initial data to be inserted.
-//
-// Returns:
-// - nil if the table is successfully created or already exists and data is inserted if the table is empty.
-// - An error if there is an issue executing the table creation or inserting the initial data.
-func CreateTable(numbers []string) error {
+func createTable() error {
 	createTable := `CREATE TABLE IF NOT EXISTS phoneNumbers (
 		id INTEGER PRIMARY KEY AUTOINCREMENT, 
 		numbers TEXT
@@ -68,22 +69,9 @@ func CreateTable(numbers []string) error {
 		return fmt.Errorf("error creating table: %w", err)
 	}
 
-	if err := insertInitialData(numbers); err != nil {
-		return fmt.Errorf("error inserting initial data into table: %w", err)
-	}
-
 	return nil
 }
 
-// insertInitialData inserts the initial data into the "phoneNumbers" table
-// if the table is empty.
-//
-// Parameters:
-// - numbers: A slice of strings containing the initial data to be inserted.
-//
-// Returns:
-// - nil if the initial data is successfully inserted or if the table is already populated.
-// - An error if there is an issue accessing the data or inserting the initial data.
 func insertInitialData(numbers []string) error {
 	var count int
 
@@ -105,41 +93,110 @@ func insertInitialData(numbers []string) error {
 	return nil
 }
 
-func InsertData(normalizedNumbers []string) error {
-	for id, number := range normalizedNumbers {
-		if _, err := db.Exec("UPDATE phoneNumbers SET numbers = ? WHERE id = ?", number, id); err != nil {
-			return fmt.Errorf("error updating normalized phone number for id '%d': %w", id, err)
-		}
+// Normalize data and remove duplicates
+
+func NormalizeAndUpdateNumbersInDB() error {
+
+	err := initializeDB()
+	if err != nil {
+		return err
 	}
-	log.Println("Successfully inserted normalized data")
+
+	defer func() error {
+		if err := closeDB(); err != nil {
+			return err
+		}
+		return nil
+	}()
+
+	rawNumbers, err := readNumbers()
+	if err != nil {
+		return fmt.Errorf("error reading numbers in database: %w", err)
+	}
+
+	normalizedNumbers, err := processNumbers(rawNumbers)
+	if err != nil {
+		return fmt.Errorf("error normalizing numbers: %w", err)
+	}
+
+	if err := updateNumbersInDB(normalizedNumbers); err != nil {
+		return fmt.Errorf("error updating databse: %w", err)
+	}
+
+	log.Println("Successfully updated database with normalized numbers")
 	return nil
 }
 
-// ReadNumbers reads all phone numbers from the "phoneNumbers" table.
-//
-// Returns:
-// - A slice of strings containing the phone numbers.
-// - An error if there is an issue reading the data.
-func ReadNumbers() ([]string, error) {
-	var numbers []string
+func readNumbers() (map[int]string, error) {
+	phoneNumbers := make(map[int]string)
 
-	rows, err := db.Query("SELECT * FROM phoneNumbers")
+	rows, err := db.Query("SELECT id, numbers FROM phoneNumbers")
 	if err != nil {
-		return nil, fmt.Errorf("error reading data: %w", err)
+		return nil, fmt.Errorf("error reading data in table: %w", err)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
+		var id int
 		var num string
-		if err := rows.Scan(&num); err != nil {
+
+		if err := rows.Scan(&id, &num); err != nil {
 			return nil, fmt.Errorf("error reading rows: %w", err)
 		}
-		numbers = append(numbers, num)
+		phoneNumbers[id] = num
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
-	return numbers, nil
+	log.Println("Successfully read all numbers from database")
+	return phoneNumbers, nil
+}
+
+func processNumbers(rawNumbers map[int]string) (map[int]string, error) {
+	normalizedNumbers := make(map[int]string)
+
+	for id, number := range rawNumbers {
+		normalized, err := normalizeNumber(number)
+		if err != nil {
+			log.Printf("error normalizing number %s with id %d: %v", number, id, err)
+			continue
+		}
+
+		normalizedNumbers[id] = normalized // removes duplicates
+	}
+
+	log.Printf("Successfully normalized all phone numbers and removed duplicates")
+	return normalizedNumbers, nil
+}
+
+func normalizeNumber(rawNumber string) (string, error) {
+	regex, err := regexp.Compile(`\D`)
+	if err != nil {
+		return "", fmt.Errorf("error parsing regular expression: %w", err)
+	}
+
+	normalized := regex.ReplaceAllString(rawNumber, "")
+	return normalized, nil
+}
+
+func updateNumbersInDB(normalizedNumbers map[int]string) error {
+	alreadyExists := make(map[string]bool)
+
+	for id, number := range normalizedNumbers {
+		if alreadyExists[number] {
+			if _, err := db.Exec("DELETE FROM phoneNumbers WHERE id = ?", id); err != nil {
+				return fmt.Errorf("error deleting duplicate phone number %s with id %d from database", number, id)
+			}
+		} else {
+			if _, err := db.Exec("UPDATE phoneNumbers SET numbers = ? WHERE id = ?", number, id); err != nil {
+				return fmt.Errorf("error updating normalized phone number for id '%d': %w", id, err)
+			}
+		}
+		alreadyExists[number] = true
+	}
+
+	log.Println("Successfully updated numbers in database")
+	return nil
 }
