@@ -18,7 +18,7 @@ func CreateDatabase(initialData []string) error {
 		return err
 	}
 
-	func() {
+	defer func() {
 		if err := closeDB(); err != nil {
 			log.Printf("error closing database: %v", err)
 		}
@@ -60,6 +60,7 @@ func closeDB() error {
 }
 
 func createTable() error {
+
 	createTable := `CREATE TABLE IF NOT EXISTS phoneNumbers (
 		id INTEGER PRIMARY KEY AUTOINCREMENT, 
 		numbers TEXT
@@ -89,7 +90,7 @@ func insertInitialData(numbers []string) error {
 			return fmt.Errorf("error inserting number '%s' column in table: %w", number, err)
 		}
 	}
-	log.Println("Initial data successfully added to database")
+
 	return nil
 }
 
